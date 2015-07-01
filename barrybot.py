@@ -24,8 +24,12 @@ import sys
 
 def run_shell_command( args ):
     cmd = " ".join( args )
+    print "running cmd: %s" % cmd
     process = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True )
-    return process.communicate()
+    output, error = process.communicate()
+    print "stdout: %s" % output
+    print "error: %s" % error
+    return output, error
 
 def run_maintenance_scripts( mediawikipath ):
     args = ['cd', mediawikipath, '&&',
@@ -44,7 +48,8 @@ def update_code_to_master( paths ):
         run_shell_command(args)
 
 def get_pending_changes( project, user ):
-    url = "https://gerrit.wikimedia.org/r/changes/?q=project:%s+(label:Verified>=0)+AND+status:open+AND+NOT+reviewer:\"%s\"&O=1"%(project,user)
+    url = "https://gerrit.wikimedia.org/r/changes/?q=project:%s+(label:Verified>=0)+status:open+label:Code-Review=0,user=%s+NOT+age:2w&O=1"%(project,user)
+    print url
     req = urllib2.Request(url)
     req.add_header('Accept',
                    'application/json,application/json,application/jsonrequest')
@@ -77,10 +82,10 @@ def run_browser_tests( path, tag = None ):
     args = ['cd', path, '&&',
         'cd', 'tests/browser/', '&&',
         'bundle', 'exec', 'cucumber', 'features/', 
-        '--format', 'rerun'
+        '--format', 'rerun', '--tags', '~@expect_failure'
     ]
-    if tag:
-        args.extend( [ '--tags', '@' + tag ] )
+    #if tag:
+    #    args.extend( [ '--tags', '@' + tag ] )
 
     output, error = run_shell_command(args)
     # Make this execute cucumber
@@ -88,14 +93,14 @@ def run_browser_tests( path, tag = None ):
         is_good = False
     else:
         is_good = True
-        output = 'Barry says good job. Keep it up.'
+        output = 'Cindy says good job. Keep it up.'
     return is_good, output
 
 def do_review( pathtotest, commit, is_good, msg, action ):
     print "Posting to Gerrit..."
     args = [ 'cd', pathtotest, '&&',
         'ssh', '-p 29418',
-        'gerrit.wikimedia.org', 'gerrit', 'review' ]
+        'cindythebrowsertestbot@gerrit.wikimedia.org', 'gerrit', 'review' ]
     if action == 'verified':
         if is_good:
             score = '+2'
@@ -104,7 +109,7 @@ def do_review( pathtotest, commit, is_good, msg, action ):
         args.extend( ['--' + action, score ] )
     else:
         if is_good:
-            score = '0'
+            score = '+1'
         else:
             score = '-1'
         args.extend( ['--' + action, score ] )
