@@ -25,11 +25,21 @@ import sys
 def run_shell_command( args ):
     cmd = " ".join( args )
     print "running cmd: %s" % cmd
+    sys.stdout.flush()
     process = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True )
-    output, error = process.communicate()
-    print "stdout: %s" % output
-    print "error: %s" % error
-    return output, error
+    output = [];
+    error = [];
+    for line in iter(process.stdout.readline, ''):
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        output.append(line)
+    for line in iter(process.stderr.readline, ''):
+        sys.stderr.write(line)
+        error.append(line)
+    #output, error = process.communicate()
+    #if error and not error.isspace():
+    #  print "error: %s" % error
+    return "\n".join(output), "\n".join(error)
 
 def run_maintenance_scripts( mediawikipath ):
     args = ['cd', mediawikipath, '&&',
@@ -48,7 +58,7 @@ def update_code_to_master( paths ):
         run_shell_command(args)
 
 def get_pending_changes( project, user ):
-    url = "https://gerrit.wikimedia.org/r/changes/?q=project:%s+(label:Verified>=0)+status:open+label:Code-Review=0,user=%s+NOT+age:2w&O=1"%(project,user)
+    url = "https://gerrit.wikimedia.org/r/changes/?q=project:%s+(label:Verified>=0)+status:open+label:Code-Review=0,user=%s+NOT+age:2w+branch:master&O=1"%(project,user)
     print url
     req = urllib2.Request(url)
     req.add_header('Accept',
@@ -69,6 +79,20 @@ def checkout_commit( path, changeid ):
     output, error = run_shell_command(args)
     commit = output.strip()
     return commit
+
+def check_dependencies( mediawikipath, pathtotest ):
+    output, error = run_shell_command([
+        "cd", pathtotest, "&&",
+        "git", "log", "-1", "|", 
+	"grep", "'^    Depends-on:'", "|",
+	"cut", "-d", ':', '-f', '2-'
+    ])
+    for line in output.strip(' ').split("\n"):
+        if line.strip() == '':
+            continue
+        commit_id = line.strip()
+        # bold assumption the commit it is a core id
+        run_shell_command(["cd", mediawikipath, "&&", "git", "review", "-d", commit_id])
 
 def bundle_install( path ):
     print 'Running bundle install'
@@ -132,9 +156,10 @@ def get_parser_arguments():
     parser.add_argument('--review', help='This will post actual reviews to Gerrit. Only use when you are sure Barry is working.', type=bool)
     parser.add_argument('--verify', help='This will post actual reviews to Gerrit. Only use when you are sure Barry is working.', type=bool)
     parser.add_argument('--user', help='The username of the bot which will do the review.', type=str, default='BarryTheBrowserTestBot')
+    parser.add_argument('--pretest', help="This command will be executed just before running the tests", action='append', default=[])
     return parser
 
-def watch( project, user, mediawikipath, pathtotest, tag = None, dependencies=[], noupdates = False, action = None ):
+def watch( project, user, mediawikipath, pathtotest, tag = None, pretest=[], dependencies=[], noupdates = False, action = None ):
     paths = [ mediawikipath, pathtotest ]
     paths.extend( dependencies )
     print "Searching for patches to review..."
@@ -146,10 +171,14 @@ def watch( project, user, mediawikipath, pathtotest, tag = None, dependencies=[]
         print "Testing %s..."%change['subject']
         if not noupdates:
             update_code_to_master( paths )
-            run_maintenance_scripts( mediawikipath )
         commit = checkout_commit( pathtotest, str(change["_number"]) )
         if not noupdates:
+            check_dependencies( mediawikipath, pathtotest )
+            run_maintenance_scripts( mediawikipath )
             bundle_install( pathtotest )
+            import pprint
+            pprint.pprint(pretest)
+            run_shell_command( [ " && ".join( pretest ) ] )
         is_good, output = run_browser_tests( pathtotest, tag )
         print 'Reviewing commit %s with (is good = %s)..' %( commit, is_good )
         print output
@@ -171,10 +200,14 @@ if __name__ == '__main__':
     else:
         action = 'verified'
 
+    import pprint;
+    pprint.pprint(args.pretest)
+    
     watch( args.project,
         args.user,
         args.core,
         args.test,
         args.tag,
+        args.pretest,
         deps, args.noupdates, action )
 
