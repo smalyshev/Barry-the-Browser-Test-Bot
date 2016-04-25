@@ -97,7 +97,7 @@ def check_dependencies( mediawikipath, pathtotest, verbose = False ):
     output, error = run_shell_command([
         "cd", pathtotest, "&&",
         "git", "log", "-1", "|",
-	"grep", "'^    Depends-on:'", "|",
+	"grep", "'^    Depends-On:'", "|",
 	"cut", "-d", ':', '-f', '2-'
     ], verbose=verbose)
     for line in output.strip(' ').split("\n"):
